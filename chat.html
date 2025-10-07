@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="pt-br" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat Direto via WebSocket</title>
+  <!-- Estilos CSS embutidos -->
+  <style>
+    /* Reset e base */
+    *, ::before, ::after { box-sizing: border-box; }
+    
+    /* Define um tamanho de fonte base para o elemento raiz para melhor responsividade com unidades rem */
+    html {
+      font-size: 16px; /* 1rem = 16px por padrão. Ajuste este valor se precisar de uma base diferente. */
+    }
+
+    body {
+      /* Fonte padrão do sistema: Arial como primeira opção, seguido por Helvetica e um fallback genérico sem serifa. */
+      font-family: Arial, Helvetica, sans-serif;
+      background-color: #111827;
+      color: #E5E7EB;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      font-size: 1rem; /* Tamanho da fonte base para o texto do corpo */
+    }
+
+    /* Layout principal */
+    .container {
+      display: flex;
+      flex-direction: column;
+      max-width: 1200px; /* Limite de largura para telas maiores */
+      width: 100%; /* Ocupa 100% da largura disponível */
+      margin: auto; /* Centraliza o container */
+      padding: 1rem;
+      gap: 1rem;
+    }
+
+    .chat-area {
+      display: flex;
+      flex-direction: column; /* Padrão para mobile (pilha vertical) */
+      gap: 1rem;
+      flex: 1; /* Permite que a área de chat ocupe o espaço disponível */
+    }
+
+    /* Layout para desktop (acima de 768px) */
+    @media (min-width: 768px) {
+      .chat-area {
+        flex-direction: row; /* Coloca os elementos lado a lado em telas maiores */
+      }
+    }
+
+    .messages-box, .users-box {
+      background-color: rgba(31, 41, 55, 0.8);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 1rem;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .messages-box {
+      flex: 1; /* Ocupa o máximo de espaço horizontal disponível */
+      max-height: 60vh; /* Limita a altura para desktop */
+      overflow: hidden; /* Esconde conteúdo que transborda */
+    }
+    
+    /* Ajusta a altura da caixa de mensagens para telas menores (mobile) */
+    @media (max-width: 767px) {
+      .messages-box {
+        max-height: 40vh; /* Permite mais espaço para outros elementos no mobile */
+      }
+    }
+
+    .messages-list {
+      flex: 1; /* A lista de mensagens ocupa o máximo de espaço vertical disponível */
+      overflow-y: auto; /* Adiciona scroll vertical se o conteúdo exceder a altura */
+      padding-right: 0.5rem;
+    }
+
+    .messages-list div {
+      margin-bottom: 0.5rem;
+      word-break: break-word; /* Garante que palavras longas sejam quebradas */
+    }
+
+    .input-area {
+      margin-top: 1rem;
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .input-area input {
+      flex: 1;
+      background: #1F2937;
+      border: 1px solid rgba(59, 130, 246, 0.5);
+      border-radius: 0.5rem;
+      padding: 0.75rem;
+      color: #E5E7EB;
+      font-family: inherit; /* Usa a mesma fonte do body */
+      font-size: 1rem; /* Garante tamanho de fonte legível */
+    }
+
+    .input-area input:focus {
+      outline: none;
+      border-color: #3B82F6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    }
+
+    .input-area button {
+      background: #3B82F6;
+      color: white;
+      border: none;
+      border-radius: 0.5rem;
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 1rem; /* Garante tamanho de fonte legível */
+    }
+
+    .users-box {
+      width: 100%; /* Ocupa 100% da largura em mobile */
+      max-width: 256px; /* Limite de largura para desktop (sidebar) */
+    }
+
+    /* Remove o limite de largura para a caixa de usuários em mobile */
+    @media (max-width: 767px) {
+      .users-box {
+        max-width: none; 
+      }
+    }
+
+    .user-item {
+      padding: 0.5rem;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.95rem; /* Ajuste para legibilidade */
+    }
+
+    .user-item:hover {
+      background: rgba(59, 130, 246, 0.2);
+    }
+
+    .user-item.active {
+      font-weight: bold;
+      background: rgba(59, 130, 246, 0.3);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    /* Teclado */
+    .keyboard {
+      background: rgba(31, 41, 55, 0.8);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 1rem;
+      padding: 1rem;
+      margin-top: 1rem;
+      overflow-x: auto; /* Permite scroll horizontal se o teclado for muito largo */
+      -webkit-overflow-scrolling: touch; /* Melhor rolagem em dispositivos iOS */
+    }
+
+    .keyboard-row {
+      display: flex;
+      justify-content: center;
+      gap: 0.25rem;
+      margin-bottom: 0.25rem;
+      flex-wrap: nowrap; /* Impede que as teclas quebrem para a próxima linha */
+    }
+
+    .key {
+      min-width: 2.2rem; /* Base menor para melhor encaixe em telas pequenas */
+      height: 2.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #1F2937;
+      color: #E5E7EB;
+      border: 1px solid rgba(59, 130, 246, 0.5);
+      border-radius: 0.375rem;
+      font-family: inherit;
+      font-size: 0.875rem; /* Ajuste para legibilidade */
+      cursor: pointer;
+      user-select: none;
+      flex: 1; /* Permite que as teclas se expandam/contraiam proporcionalmente */
+    }
+
+    /* Teclas "wide" (Espaço e Enter) terão o dobro da largura relativa */
+    .key.wide {
+      flex: 2; 
+    }
+
+    .key.action {
+      background: #3B82F6;
+      color: white;
+    }
+
+    .key.action.active { /* Estilo para Shift/Capslock quando ativados */
+        background: #2563EB; /* Um azul um pouco mais escuro */
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+    }
+
+    .key:hover {
+      background: rgba(59, 130, 246, 0.3);
+    }
+
+    /* Ajustes específicos para telas muito pequenas (smartphones) no teclado */
+    @media (max-width: 480px) {
+      .keyboard {
+        padding: 0.75rem;
+        margin-top: 0.75rem;
+      }
+      .keyboard-row {
+        gap: 0.15rem; /* Diminui o espaçamento entre as teclas */
+      }
+      .key {
+        min-width: 1.8rem; /* Teclas ainda menores */
+        height: 2.2rem;
+        font-size: 0.75rem;
+        border-radius: 0.25rem;
+      }
+      /* O flex: 2 para .wide já funcionará bem com o min-width ajustado */
+    }
+
+
+    /* Palavras rápidas */
+    .quick-words {
+      display: flex;
+      flex-wrap: wrap; /* Permite que os botões quebrem a linha */
+      gap: 0.25rem;
+      margin-top: 0.5rem;
+      justify-content: center; /* Centraliza os botões */
+    }
+
+    .quick-word {
+      background: #1F2937;
+      color: #E5E7EB;
+      border: 1px solid rgba(59, 130, 246, 0.5);
+      border-radius: 0.375rem;
+      padding: 0.25rem 0.5rem;
+      font-size: 0.75rem;
+      cursor: pointer;
+      flex-shrink: 0; /* Impede que os botões encolham demais e fiquem ilegíveis */
+      white-space: nowrap; /* Impede que o texto dentro do botão quebre */
+    }
+
+    .quick-word:hover {
+      background: rgba(59, 130, 246, 0.3);
+    }
+
+    /* Rodapé */
+    .footer {
+      text-align: center;
+      padding: 0.5rem;
+      font-size: 0.75rem;
+      color: #9CA3AF;
+      margin-top: 1rem;
+    }
+
+    .footer a {
+      color: #3B82F6;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2 class="text-center text-primary font-bold text-xl">DeepChat +seguro</h2>
+
+    <div class="chat-area">
+      <div class="messages-box">
+        <div class="messages-list" id="messages"></div>
+        <div class="input-area">
+          <input type="text" id="textInput" placeholder="Digite sua mensagem..." autocomplete="off" />
+          <button id="sendBtn">Enviar</button>
+        </div>
+      </div>
+
+      <div class="users-box">
+        <div class="font-bold text-primary mb-2">Usuários Online</div>
+        <ul id="userList" class="space-y-1"></ul>
+      </div>
+    </div>
+
+    <!-- Teclado de palavras rápidas -->
+    <div class="keyboard">
+      <div class="quick-words" id="quickWords"></div>
+    </div>
+
+    <!-- Teclado virtual -->
+    <div class="keyboard" id="virtualKeyboard"></div>
+
+    <!-- Rodapé com instruções -->
+    <div class="footer">
+      Clique em <a id="learnBtn">Aprender</a> para ver instruções do teclado.
+    </div>
+  </div>
+
+  <script>
+    // ======= Configuração do WebSocket =======
+    const nickname = prompt("Escolha seu nome de usuário:") || "Anônimo";
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`wss://${window.location.host}`);
+    const messagesEl = document.getElementById("messages");
+    const userListEl = document.getElementById("userList");
+    const textInput = document.getElementById("textInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const quickWordsEl = document.getElementById("quickWords");
+    const virtualKeyboardEl = document.getElementById("virtualKeyboard");
+    const learnBtn = document.getElementById("learnBtn");
+
+    let selectedUser = "Todos";
+    let isShift = false;
+    let isCaps = false;
+
+    // ======= Dados rápidos =======
+    const quickPhrasesData = [
+      { palavra: "Eu", abrev: "EU", simbolo: "👆" },
+      { palavra: "Voce", abrev: "VC", simbolo: "👤➡️" },
+      { palavra: "Nos", abrev: "NOS", simbolo: "👥" },
+      { palavra: "Ola", abrev: "OI", simbolo: "👋" },
+      { palavra: "Falar", abrev: "SOM", simbolo: "🗣️<))" },
+      { palavra: "Ouvir", abrev: "OUV", simbolo: "<))👂" },
+      { palavra: "Ver", abrev: "VER", simbolo: "👀" },
+      { palavra: "Mensagem", abrev: "MSG", simbolo: "✉️ . .." },
+      { palavra: "Nuvem", abrev: "subir", simbolo: "☁️⇧" },
+      { palavra: "Conectar", abrev: "CON", simbolo: "🔗" },
+      { palavra: "Mente", abrev: "CPU", simbolo: "🧠" },
+      { palavra: "Sim", abrev: "SIM", simbolo: "👍ok" },
+      { palavra: "Nao", abrev: "NO", simbolo: "🚫--👎" },
+      { palavra: "Retribuir", abrev: "RE", simbolo: "$↩️" },
+      { palavra: "Continuar", abrev: "IR", simbolo: "🔜" },
+      { palavra: "Pergunta", abrev: "?", simbolo: "❓" },
+      { palavra: "Situacao", abrev: "SIT", simbolo: "ℹ️💬" },
+      { palavra: "Urgente", abrev: "URG", simbolo: "🚨" },
+      { palavra: "Ajuda", abrev: "AJUDA", simbolo: "+✋🆘🤝" },
+      { palavra: "Final", abrev: "FIM", simbolo: "🏁" },
+      { palavra: "Explicar", abrev: "EXP", simbolo: "🔄" },
+      { palavra: "Perfeito", abrev: "PERF", simbolo: "⭐" },
+      { palavra: "Perdao", abrev: "ERREI", simbolo: "🙏" },
+      { palavra: "Certo", abrev: "CER", simbolo: "✅" },
+      { palavra: "Errado", abrev: "ERRAD", simbolo: "❌" },
+      { palavra: "Mais", abrev: "PLU", simbolo: "➕" },
+      { palavra: "Menos", abrev: "mEn", simbolo: "➖" },
+      { palavra: "Direito", abrev: "DIR", simbolo: "➡️👤" },
+      { palavra: "Esquerdo", abrev: "ESQ", simbolo: "👤⬅️" },
+      { palavra: "Desnecessario", abrev: "DESN", simbolo: "🚫" },
+      // Corrigidas para exibição no botão e para inserção do valor correto
+      { palavra: "@", abrev: "", simbolo: "@" },
+      { palavra: "http://", abrev: "", simbolo: "http://" },
+      { palavra: ".com", abrev: "", simbolo: ".com" }
+    ];
+
+    // ======= Renderiza palavras rápidas =======
+    quickPhrasesData.forEach(item => {
+      const btn = document.createElement("button");
+      btn.className = "quick-word";
+      
+      // Lógica aprimorada para exibir o texto do botão de forma inteligente
+      // Prioriza 'símbolo + abreviação' se ambos forem significativos e a palavra for longa
+      // Caso contrário, tenta exibir o símbolo ou abreviação curtos, ou a palavra completa.
+      if (item.simbolo && item.abrev && item.simbolo !== item.abrev && item.palavra.length > 3) {
+        btn.textContent = `${item.simbolo} ${item.abrev}`;
+      } else if (item.simbolo && item.simbolo.length <= 6) { // Para símbolos curtos
+        btn.textContent = item.simbolo;
+      } else if (item.abrev && item.abrev.length <= 6) { // Para abreviações curtas
+        btn.textContent = item.abrev;
+      } else {
+        btn.textContent = item.palavra; // Default para palavra completa
+      }
+      
+      btn.title = item.palavra; // A dica de ferramenta (tooltip) ainda mostra a palavra completa
+      btn.onclick = () => {
+        textInput.value += item.palavra + " ";
+        textInput.focus();
+      };
+      quickWordsEl.appendChild(btn);
+    });
+
+    // ======= Layout do teclado =======
+    const keyboardLayout = {
+      default: [
+        ['1','2','3','4','5','6','7','8','9','0','-','=','backspace'],
+        ['q','w','e','r','t','y','u','i','o','p','[',']','\\'],
+        ['a','s','d','f','g','h','j','k','l',';',"'",'enter'],
+        ['shift','z','x','c','v','b','n','m',',','.','/'], // Corrigido: Apenas um botão Shift
+        ['space']
+      ],
+      shift: [
+        ['!','?','#','$','%','^','&','*','(',')','_','+','backspace'],
+        ['Q','W','E','R','T','Y','U','I','O','P','{','}','|'],
+        ['@','A','S','D','F','G','H','J','K','L',':','"','enter'],
+        ['shift','Z','X','C','V','B','N','M','<','>'], // Corrigido: Apenas um botão Shift
+        ['space']
+      ]
+    };
+
+    function renderKeyboard() {
+      virtualKeyboardEl.innerHTML = '';
+      const layout = isShift ? keyboardLayout.shift : keyboardLayout.default;
+
+      layout.forEach(row => {
+        const rowEl = document.createElement("div");
+        rowEl.className = "keyboard-row";
+        row.forEach(key => {
+          const keyEl = document.createElement("div");
+          keyEl.className = "key";
+          if (key === 'space') {
+            keyEl.className += " wide";
+            keyEl.textContent = "␣";
+          } else if (key === 'backspace') {
+            keyEl.className += " action";
+            keyEl.textContent = "⌫";
+          } else if (key === 'enter') {
+            keyEl.className += " action wide"; /* Adicionado 'wide' para o Enter */
+            keyEl.textContent = "⏎";
+          } else if (key === 'shift') {
+            keyEl.className += " action" + (isShift ? ' active' : ''); /* Adiciona 'active' se Shift estiver ligado */
+            keyEl.textContent = '⇧';
+          } else if (key === 'capslock') {
+            keyEl.className += " action" + (isCaps ? ' active' : ''); /* Adiciona 'active' se Caps Lock estiver ligado */
+            keyEl.textContent = '⇪';
+          } else {
+            keyEl.textContent = key;
+          }
+
+          keyEl.onclick = () => handleKeyPress(key);
+          rowEl.appendChild(keyEl);
+        });
+        virtualKeyboardEl.appendChild(rowEl);
+      });
+    }
+
+    function handleKeyPress(key) {
+      if (key === 'backspace') {
+        textInput.value = textInput.value.slice(0, -1);
+      } else if (key === 'enter') {
+        sendBtn.click();
+      } else if (key === 'space') {
+        textInput.value += ' ';
+      } else if (key === 'shift') {
+        isShift = !isShift;
+        if (isCaps && isShift) isCaps = false; // Se Caps estava ligado e Shift é ativado, desativa Caps
+        renderKeyboard();
+      } else if (key === 'capslock') {
+        isCaps = !isCaps;
+        isShift = isCaps; // Caps Lock ativado implica em Shift para letras por convenção
+        renderKeyboard();
+      } else {
+        let charToAdd = key;
+        // Lógica aprimorada para Caps Lock e Shift
+        if (isCaps && key.match(/[a-z]/i)) { // Se Caps Lock está ativo e a tecla é uma letra minúscula
+            charToAdd = key.toUpperCase();
+        } else if (isShift && key.match(/[a-z]/i)) { // Se Shift está ativo e a tecla é uma letra minúscula
+            charToAdd = key.toUpperCase();
+        } else if (isShift && key.match(/[A-Z]/i)) { // Se Shift está ativo e a tecla é uma letra maiúscula
+            charToAdd = key.toLowerCase();
+        }
+        // Para símbolos, o layout 'shift' já lida com a mudança de caractere
+
+        textInput.value += charToAdd;
+      }
+      textInput.focus();
+    }
+
+    renderKeyboard();
+
+    // ======= WebSocket =======
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: "register_nickname", nickname }));
+    };
+
+    ws.onmessage = event => {
+      const data = JSON.parse(event.data);
+      switch (data.type) {
+        case "user_list":
+          updateUserList(data.users);
+          break;
+        case "message":
+          addMessage(`[Público] ${data.sender}: ${data.text}`);
+          break;
+        case "dm":
+          const dir = data.sender === nickname ? "➡️" : "⬅️";
+          addMessage(`[DM ${dir}] ${data.sender} → ${data.target}: ${data.text}`);
+          break;
+        case "notification":
+          addMessage(`[Sistema] ${data.text}`);
+          break;
+      }
+    };
+
+    sendBtn.onclick = () => {
+      const text = textInput.value.trim();
+      if (!text) return;
+
+      if (selectedUser === "Todos") {
+        ws.send(JSON.stringify({ type: "message", text }));
+      } else {
+        ws.send(JSON.stringify({ type: "dm", target: selectedUser, text }));
+      }
+      textInput.value = "";
+      textInput.focus();
+    };
+
+    textInput.addEventListener("keypress", e => {
+      if (e.key === "Enter") sendBtn.click();
+    });
+
+    function updateUserList(users) {
+      userListEl.innerHTML = "";
+      const allItem = document.createElement("li");
+      allItem.className = "user-item" + (selectedUser === "Todos" ? " active" : "");
+      allItem.innerHTML = '<span class="dot" style="background:#3B82F6"></span> Todos';
+      allItem.onclick = () => { selectedUser = "Todos"; updateUserList(users); };
+      userListEl.appendChild(allItem);
+
+      users.forEach(user => {
+        if (user === nickname) return;
+        const li = document.createElement("li");
+        li.className = "user-item" + (user === selectedUser ? " active" : "");
+        li.innerHTML = `<span class="dot" style="background:#10B981"></span> ${user}`;
+        li.onclick = () => { selectedUser = user; updateUserList(users); };
+        userListEl.appendChild(li);
+      });
+    }
+
+    function addMessage(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    // ======= Aprender =======
+    learnBtn.onclick = () => {
+      const msg = `Teclado:\n- Clique nas teclas para digitar.\n- "⇧" ativa/desativa Shift+Caps.\n- "⌫" apaga o último caractere.\n- "⏎" envia a mensagem.\n\nPalavras Rápidas:\nClique em qualquer botão (ex: 👋 OI) para inserir a palavra completa no campo de texto, pare o mouse sobre para ler a mensagem do botão.`;
+      alert(msg);
+    };
+  </script>
+
+<br><center>Publicidade troca banner gratuito! <a href="https://MapsFlaskGenis.pythonanywhere.com"> Trocar banner </a>
+<div id="linkup-banner" data-slot-id="deepchat-28h8" style="width:300px;height:120px;"></div>
+<script src="https://MapsFlaskGenis.pythonanywhere.com/static/trocalinks-client.js?v=1759798954"></script>
+
+</body>
+</html>
