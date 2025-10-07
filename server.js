@@ -3,9 +3,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-// Configuração
-const PORT = 3000;
-const CLIENT_FILE = './chat.html';
+// Configuração: use index.html (padrão web)
+const CLIENT_FILE = 'index.html';
 
 // Armazenamento em memória (volátil)
 const clients = new Map(); // { ws: { nickname, ws } }
@@ -13,8 +12,9 @@ const clients = new Map(); // { ws: { nickname, ws } }
 // Servidor HTTP para servir o HTML
 const server = http.createServer((req, res) => {
   if (req.url === '/') {
-    fs.readFile(path.resolve(CLIENT_FILE), (err, data) => {
+    fs.readFile(path.join(__dirname, CLIENT_FILE), (err, data) => {
       if (err) {
+        console.error('Erro ao carregar:', err.message);
         res.writeHead(500);
         res.end('Erro ao carregar o cliente.');
         return;
@@ -46,7 +46,6 @@ function sendNotification(ws, message) {
 }
 
 wss.on('connection', (ws) => {
-  // Registro inicial obrigatório
   let registered = false;
 
   ws.on('message', (data) => {
@@ -57,7 +56,6 @@ wss.on('connection', (ws) => {
           const nickname = msg.nickname.trim();
           if (!nickname) return;
 
-          // Verifica se já existe
           if (Array.from(clients.values()).some(c => c.nickname === nickname)) {
             ws.send(JSON.stringify({ type: 'notification', text: 'Nome já em uso. Atualize a página e escolha outro.' }));
             ws.close();
@@ -76,10 +74,11 @@ wss.on('connection', (ws) => {
         } else {
           ws.close();
         }
+        return;
       } catch (e) {
         ws.close();
+        return;
       }
-      return;
     }
 
     try {
@@ -89,7 +88,6 @@ wss.on('connection', (ws) => {
 
       switch (msg.type) {
         case 'message':
-          // Mensagem pública
           const publicMsg = JSON.stringify({ type: 'message', sender, text: msg.text });
           wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
@@ -99,12 +97,10 @@ wss.on('connection', (ws) => {
           break;
 
         case 'dm':
-          // Mensagem direta
           if (!msg.target || !msg.text) return;
           const targetClient = Array.from(clients.entries()).find(([_, c]) => c.nickname === msg.target)?.[0];
           if (targetClient && targetClient.readyState === WebSocket.OPEN) {
             targetClient.send(JSON.stringify({ type: 'dm', sender, target: msg.target, text: msg.text }));
-            // Também envia para o remetente (para confirmar)
             ws.send(JSON.stringify({ type: 'dm', sender, target: msg.target, text: msg.text }));
           } else {
             sendNotification(ws, `Usuário "${msg.target}" não está online.`);
@@ -112,7 +108,7 @@ wss.on('connection', (ws) => {
           break;
       }
     } catch (e) {
-      // Ignora mensagens inválidas
+      // Ignora
     }
   });
 
@@ -135,7 +131,10 @@ wss.on('connection', (ws) => {
   });
 });
 
-server.listen(PORT, () => {
+// ✅ Configuração essencial para o Render
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Servidor rodando em http://localhost:${PORT}`);
-  console.log(`📁 Servindo ${path.resolve(CLIENT_FILE)}`);
+  console.log(`📁 Servindo: ${path.join(__dirname, CLIENT_FILE)}`);
 });
